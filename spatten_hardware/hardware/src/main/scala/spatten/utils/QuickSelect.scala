@@ -34,7 +34,8 @@ object QuickSelect {
     }
 }
 
-class QuickSelect[T <: Data](val config: QuickSelect.Config[T]) extends Component {
+// FIX 1: Added "with Stageable" right here to fix the ClassCastException
+class QuickSelect[T <: Data](val config: QuickSelect.Config[T]) extends Component with Stageable {
     import QuickSelect._
     import config._
 
@@ -77,11 +78,16 @@ class QuickSelect[T <: Data](val config: QuickSelect.Config[T]) extends Componen
         }
         
         val output = stageOut(input.throwWhen(buffered_data =/= parallelism / sizeIn - 1 && !input.last)
-            .translateInto(Stream(Fragment(Request(config)))) { (to, from) => 
+            .translateInto(Stream(Fragment(Request(config.copy(sizeIn = parallelism))))) { (to, from) =>
             to.last            := from.last
             to.fragment.len    := buffered_len + from.fragment.len
             to.fragment.target := from.fragment.target
-            to.fragment.data   := Vec(data.foldLeft(new ArrayBuffer[T])(_ ++ _) ++ from.fragment.data)
+            
+            // FIX 2: Element-by-element assignment to fix the Vec size compilation error
+            val temp_data = data.foldLeft(new ArrayBuffer[T])(_ ++ _) ++ from.fragment.data
+            for (i <- 0 until parallelism) {
+                to.fragment.data(i) := temp_data(i)
+            }
         })
     }
 

@@ -55,7 +55,8 @@ object ShiftVec {
     }
 }
 
-class ZeroEliminatorFrag[T <: Data, TContext <: Data](val config: ZeroEliminator.Config[T, TContext]) extends Component {
+// PREVIOUS FIX: Stageable trait added
+class ZeroEliminatorFrag[T <: Data, TContext <: Data](val config: ZeroEliminator.Config[T, TContext]) extends Component with Stageable {
     import ZeroEliminator._
     val io = new Bundle {
         val req  = slave  Stream(Fragment(Request (config)))
@@ -69,7 +70,7 @@ class ZeroEliminatorFrag[T <: Data, TContext <: Data](val config: ZeroEliminator
 
         val inst = new ZeroEliminator(Config(config.genT, Fragment(config.genContext()), config.sizeIn, config.sizeIn max config.sizeOut, config.policy))
 
-        inst.io.req.translateFrom(io.req) { (to, from) => 
+        inst.io.req.translateFrom(input) { (to, from) => 
             to.data             := from.data
             to.keep_data        := from.keep_data
             to.context.fragment := from.context
@@ -100,9 +101,15 @@ class ZeroEliminatorFrag[T <: Data, TContext <: Data](val config: ZeroEliminator
         }
 
         output.valid := valid && (last || size >= config.sizeOut)
-        output.data := Vec(data.slice(0, config.sizeOut))
         output.last := size <= config.sizeOut
-        output.size := Mux(size > config.sizeOut, U(config.sizeOut), size)
+        
+        // NEW FIX: Explicitly resized the Mux to match the scaled-down output fragment size
+        output.size := Mux(size > config.sizeOut, U(config.sizeOut), size).resized
+
+        // PREVIOUS FIX: Safe element loop
+        for (i <- 0 until config.sizeOut) {
+            output.data(i) := data(i)
+        }
 
         when (input.fire) {
             valid := True
@@ -119,11 +126,15 @@ class ZeroEliminatorFrag[T <: Data, TContext <: Data](val config: ZeroEliminator
         size := size + size_push - size_pop
 
         val input_shifted = ShiftVec.shiftRight(input.data, size - size_pop, config.sizeOut)
+        
+        // PREVIOUS FIX: Out of bounds shift protection
         for (i <- 0 until config.sizeOut + input.data.size) {
             when (i >= size - size_pop) {
                 data(i) := input_shifted(i)
             } elsewhen (output.fire) {
-                data(i) := data(i + config.sizeOut)
+                if (i < input.data.size) {
+                    data(i) := data(i + config.sizeOut)
+                }
             }
         }
     }
@@ -157,7 +168,8 @@ class ZeroEliminator[T <: Data, TContext <: Data](val config: ZeroEliminator.Con
     val prefixsum_inst = new PrefixSum(psumConfig)
 
     prefixsum_inst.io.req << io.req.translateInto(cloneOf(prefixsum_inst.io.req)) { (to, from) => 
-        to.data    := Vec(from.keep_data.map((x: Bool) => (!x).asUInt))
+        // NEW FIX: Appended .resized so the 1-bit boolean correctly zero-extends to the target port width
+        to.data    := Vec(from.keep_data.map((x: Bool) => (!x).asUInt.resized))
         to.context := from
     }
 
@@ -221,14 +233,16 @@ class ZeroEliminator[T <: Data, TContext <: Data](val config: ZeroEliminator.Con
         }
     }
 
-    val delay_valid   = Delay(input.valid,              numRegisterLayers, input.ready, False)
-    val delay_context = Delay(input.context.context,    numRegisterLayers, input.ready)
-    val delay_size    = Delay(sizeIn - input.data.last, numRegisterLayers, input.ready)
+    val delay_valid   = Delay(input.valid,               numRegisterLayers, input.ready, False)
+    val delay_context = Delay(input.context.context,     numRegisterLayers, input.ready)
+    val delay_size    = Delay(sizeIn - input.data.last,  numRegisterLayers, input.ready)
 
     input.ready := !delay_valid || io.resp.ready
 
     io.resp.valid   := delay_valid
     io.resp.data    := Vec(layers(numLayers).data.slice(0, sizeOut))
-    io.resp.size    := Mux(delay_size <= sizeOut, delay_size.resized, U(sizeOut))
+    
+    // NEW FIX: Hardened the width mapping here as well
+    io.resp.size    := Mux(delay_size <= sizeOut, delay_size, U(sizeOut)).resized
     io.resp.context := delay_context
 }

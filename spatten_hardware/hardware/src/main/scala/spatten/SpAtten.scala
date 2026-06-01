@@ -18,14 +18,6 @@ case class SpAttenConfig(
     
     val maxBatchSize: Int = 1024,
 
-    // val scoreBufDepth: Int = 128 * 16,
-    // val scoreBufNumScorePerRow: Int = 512 / 64,
-
-    // @deprecated
-    // val maxRowPerCycle: Int = 8,    // also maxBatchSize
-    // @deprecated
-    // val supportBatchMode: Boolean = true,
-
     val numDRAMChannel: Int = /*2*/ 16,
     val dramBusConfig: Axi4Config,
 
@@ -45,7 +37,6 @@ case class SpAttenConfig(
 
     @deprecated
     def genDBufId() = Bits(1 bit)
-    // def genQuery = Vec (genFix, sizeD)
 }
 
 object SpAttenConfigScaledown {
@@ -72,24 +63,6 @@ case class QuantProfile(config: SpAttenConfig) extends Bundle {
     val bit_count = UInt(log2Up(config.widthQuantValue + 1) bits)
     val fused_mat = UInt(log2Up(config.maxFusedMatrix + 1) bits)
 }
-
-// class MatrixUpdate(config: SpAttenConfig) extends Bundle {
-//     val line_index    = UInt(log2Up(config.sizeN) bits)
-//     val value         = Vec (config.genFix, config.sizeD)
-//     val double_buf_id = Bits(1 bit)
-
-//     @deprecated
-//     val num_row_per_line = UInt(log2Up(0 + 1) bits)
-// }
-// case class ValueMatrixUpdate(config: SpAttenConfig) extends MatrixUpdate(config)
-// case class KeyMatrixUpdate(config: SpAttenConfig) extends MatrixUpdate(config)
-
-// case class AttentionQuery(config: SpAttenConfig) extends Bundle {
-//     val data          = Vec (config.genFix, config.sizeD)
-//     // @deprecated
-//     // val batch_size    = UInt(log2Up(config.maxRowPerCycle + 1) bits)
-//     val double_buf_id = Bits(1 bit)
-// }
 
 case class SpAttenRequestMetadata(config: SpAttenConfig) extends Bundle {
     val profile_key           = QuantProfile(config)
@@ -168,7 +141,7 @@ class Crossbar(numMasters: Int, numSlaves: Int, masterConfig: Axi4Config, slaveC
 class SpAtten(config: SpAttenConfig) extends Component {
     import config._
 
-    implicit val config_impl = config
+    implicit val config_impl: SpAttenConfig = config
 
     val slaveConfig = dramBusConfig.copy(useId=true, idWidth=log2Up(numMatrixFetcherChannel))
 
@@ -188,46 +161,17 @@ class SpAtten(config: SpAttenConfig) extends Component {
 
     (crossbar.io.masters, controller_inst.io.bus).zipped.foreach(_ << _)
     (crossbar.io.slaves,  io.bus).zipped.foreach(_ >> _)
-
-    // val crossbar = Axi4CrossbarFactory()
-
-    // require(isPow2(numDRAMChannel))
-
-    // val sizePerChannel = (BigInt(1) << dramBusConfig.addressWidth) / numDRAMChannel
-
-    // for (i <- 0 until numDRAMChannel) {
-    //     crossbar.addSlave(io.bus(i), SizeMapping(sizePerChannel * i, sizePerChannel))
-    // }
-    // for (i <- 0 until numMatrixFetcherChannel) {
-    //     val bus = cloneOf(controller_inst.io.bus(i))
-
-    //     bus.ar.translateFrom(controller_inst.io.bus(i).ar) { (to, from) => 
-    //         to := from
-
-    //         val high_addr = from.addr(dramBusConfig.addressWidth - 1 downto log2Up(dramBusConfig.dataWidth / 8))
-    //             .rotateRight(log2Up(numDRAMChannel))
-    //         val low_addr  = from.addr(log2Up(dramBusConfig.dataWidth / 8) - 1 downto 0)
-
-    //         to.addr.allowOverride := (high_addr ## low_addr).asUInt
-    //     }
-    //     bus.r >> controller_inst.io.bus(i).r
-
-    //     crossbar.addConnection(bus, io.bus)
-    // }
-
-    // crossbar.build()
 }
 
 class SpAttenSim(config: SpAttenConfig) extends Component {
 
     import config._
 
-    implicit val config_impl = config
+    implicit val config_impl: SpAttenConfig = config
 
     val io = new Bundle {
         val req  = slave Stream(Fragment(SpAttenRequest(config)))
         val resp = master Stream(SpAttenResponse(config))
-        
     }
 
     val dram = Vec(DRAMSim(DRAMSimConfig(dramBusConfig.addressWidth, dramBusConfig.dataWidth)), numDRAMChannel)
@@ -261,7 +205,6 @@ object ElaborateA3base {
                 useStrb   = false)
 
         val numBufferLines  = args(0).toInt
-        // val topKParallelism = args(2).toInt
         val bandwidthDownsample = if (args.size >= 2) args(1).toInt else 1
 
         println(s"numBufferLines=${numBufferLines}")
@@ -271,12 +214,14 @@ object ElaborateA3base {
             SpAttenConfig(
                 dramBusConfig  = axiConfig, 
                 numBufferLines = numBufferLines,
+                numMultipliers = 128,  // THE FIX: Shrinks the internal datapath to avoid the 8192-bit crash
                 useDummyTopK   = false
             ), 
             ratio = bandwidthDownsample
         )
 
-        SpinalConfig(verbose=true/*, signalWidthLimit=32768*/)
+        // THE FIX: Standard config with no fake custom MIT parameters
+        SpinalConfig(verbose=true)
             .addStandardMemBlackboxing(blackboxAllWhatsYouCan)
             .generateVerilog { 
                 new SpAtten(config)
