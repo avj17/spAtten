@@ -1,6 +1,5 @@
 package spatten.sim
 
-
 import com.github.tototoshi.csv._
 
 import spinal.core._
@@ -175,10 +174,13 @@ object TestSpAtten {
                 metadata.profile_val.bit_count #= req.quant_val_bit
                 metadata.profile_val.fused_mat #= (if (req.quant_val_bit == 6) 2 else 1)
                 metadata.size_d #= 64
-                // metadata.key_fetch_num         #= (req.key_fetch_num + 31) / 32 * 32
-                // metadata.val_fetch_num         #= (req.val_fetch_num + 31) / 32 * 32
-                metadata.key_fetch_num         #= (req.key_fetch_num + 7) / 8 * 8
-                metadata.val_fetch_num         #= (req.val_fetch_num + 7) / 8 * 8
+                
+                // FIXED ALIGNMENT: Uncommented the 32-byte (256-bit) AXI alignment
+                metadata.key_fetch_num         #= (req.key_fetch_num + 31) / 32 * 32
+                metadata.val_fetch_num         #= (req.val_fetch_num + 31) / 32 * 32
+                // metadata.key_fetch_num         #= (req.key_fetch_num + 7) / 8 * 8
+                // metadata.val_fetch_num         #= (req.val_fetch_num + 7) / 8 * 8
+                
                 metadata.key_base_addr         #= 0xAB10000 + 0x10000 * id
                 metadata.key_requant_base_addr #= 0xAB20000 + 0x10000 * id
                 metadata.val_base_addr         #= 0xCD10000 + 0x10000 * id

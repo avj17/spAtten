@@ -17,6 +17,8 @@ MemorySystem:
     impl: Generic
     Scheduler:
       impl: FRFCFS
+    RowPolicy:
+      impl: OpenRowPolicy    # <-- THIS IS THE EXACT FIX
     RefreshManager:
       impl: AllBank
     plugins:
@@ -26,5 +28,3 @@ MemorySystem:
 
   AddrMapper:
     impl: RoBaRaCoCh
-    # impl: ChRaBaRoCo
-    # impl: MOP4CLXOR

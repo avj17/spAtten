@@ -5,38 +5,26 @@ import spinal.lib._
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.misc.SizeMapping
 
-
 case class SpAttenConfig(
-    val widthQuantValue: Int = 12 /*32*/,
+    val widthQuantValue: Int = 12,
     val widthFPValue: Int = 32,
-    // @deprecated
-    // val sizeN: Int = 320,
     val minD: Int = 64,
     val sizeD: Int = 64,
-    val numMultipliers: Int = /* 64   */ 512,
-    val numBufferLines: Int = /* 2048 */ 256,
-    
+    val numMultipliers: Int = 512,
+    val numBufferLines: Int = 256,
     val maxBatchSize: Int = 1024,
-
-    val numDRAMChannel: Int = /*2*/ 16,
+    val numDRAMChannel: Int = 16,
     val dramBusConfig: Axi4Config,
-
-    val numMatrixFetcherChannel: Int = /*4*/ 32,
+    val numMatrixFetcherChannel: Int = 32,
     val maxFusedMatrix: Int = 2,
-
     val useDummyTopK: Boolean = true
 ) {
     val maxNumKey      = numMultipliers / minD * numBufferLines
     val maxNumVal      = maxNumKey
     val numSoftMaxUnit = numMultipliers / minD
-
     def genFix()    = SInt(widthQuantValue bits)
     def genFloat()  = Bits(widthFPValue bits)
-
     def genBufAddr()  = UInt(log2Up(numBufferLines) bits)
-
-    @deprecated
-    def genDBufId() = Bits(1 bit)
 }
 
 object SpAttenConfigScaledown {
@@ -77,8 +65,6 @@ case class SpAttenRequestMetadata(config: SpAttenConfig) extends Bundle {
     val size_d                = UInt(log2Up(config.sizeD + 1) bits)
     val allow_requantize      = Bool
     val thres_requantize      = config.genFix()
-
-    // for debug
     val universal_id          = UInt(32 bits).dontSimplifyIt()
     val topk_latency          = UInt(32 bits)
 }
@@ -108,7 +94,8 @@ class Crossbar(numMasters: Int, numSlaves: Int, masterConfig: Axi4Config, slaveC
         balance_masters(i) := (balance_masters(i) + io.masters(i).ar.fire.asSInt - io.masters(i).r.fire.asSInt).resized
     }
 
-    val low_bit = 5
+    // FIX 1: Set back to 5 for 256-bit (32-byte) bus alignment
+    val low_bit = 5 
 
     val m2s_ar = Vec.tabulate(numMasters) { i => 
         StreamDemux(io.masters(i).ar, io.masters(i).ar.addr(log2Up(numSlaves) + low_bit - 1 downto low_bit), numSlaves)
@@ -140,9 +127,7 @@ class Crossbar(numMasters: Int, numSlaves: Int, masterConfig: Axi4Config, slaveC
 
 class SpAtten(config: SpAttenConfig) extends Component {
     import config._
-
     implicit val config_impl: SpAttenConfig = config
-
     val slaveConfig = dramBusConfig.copy(useId=true, idWidth=log2Up(numMatrixFetcherChannel))
 
     val io = new Bundle {
@@ -151,35 +136,29 @@ class SpAtten(config: SpAttenConfig) extends Component {
         val bus  = Vec(master(Axi4ReadOnly(slaveConfig)), numDRAMChannel)
     }
 
-
     val controller_inst = new SpAttenController
-
     controller_inst.io.req  << io.req
     controller_inst.io.resp >> io.resp
 
     val crossbar = new Crossbar(numMatrixFetcherChannel, numDRAMChannel, dramBusConfig, slaveConfig)
-
     (crossbar.io.masters, controller_inst.io.bus).zipped.foreach(_ << _)
     (crossbar.io.slaves,  io.bus).zipped.foreach(_ >> _)
 }
 
 class SpAttenSim(config: SpAttenConfig) extends Component {
-
     import config._
-
     implicit val config_impl: SpAttenConfig = config
 
     val io = new Bundle {
         val req  = slave Stream(Fragment(SpAttenRequest(config)))
-        val resp = master Stream(SpAttenResponse(config))
+        val resp = master Stream(SpAttenResponse(config)) 
     }
 
     val dram = Vec(DRAMSim(DRAMSimConfig(dramBusConfig.addressWidth, dramBusConfig.dataWidth)), numDRAMChannel)
-
     val spatten_inst = new SpAtten(config)
 
     spatten_inst.io.req  << io.req
-    spatten_inst.io.resp >> io.resp
+    spatten_inst.io.resp >> io.resp 
     (dram, spatten_inst.io.bus).zipped.foreach { _.fromAxi4(_) }
 
     val dram_insts = Array.tabulate(numDRAMChannel) { i => new DRAMSimDPIDriver(dram(i).config) }
@@ -190,6 +169,7 @@ class SpAttenSim(config: SpAttenConfig) extends Component {
 
 object ElaborateA3base {
     def main(args: Array[String]): Unit = {
+        // FIX 2: Set dataWidth to 256 to match the C++ DataLoader
         val axiConfig = Axi4Config(32, 256, 
                 useId     = false,
                 useRegion = false,
@@ -214,13 +194,12 @@ object ElaborateA3base {
             SpAttenConfig(
                 dramBusConfig  = axiConfig, 
                 numBufferLines = numBufferLines,
-                numMultipliers = 128,  // THE FIX: Shrinks the internal datapath to avoid the 8192-bit crash
+                numMultipliers = 128,
                 useDummyTopK   = false
             ), 
             ratio = bandwidthDownsample
         )
 
-        // THE FIX: Standard config with no fake custom MIT parameters
         SpinalConfig(verbose=true)
             .addStandardMemBlackboxing(blackboxAllWhatsYouCan)
             .generateVerilog { 

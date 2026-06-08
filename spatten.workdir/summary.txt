@@ -1,0 +1,6 @@
+/home/arun-venkat/summer_project/spatten/data/mt_bench.jsonl,0,64,16
+/home/arun-venkat/summer_project/spatten/spatten_hardware/hardware/workloads/clean_small.csv,0,64,16
+/home/arun-venkat/summer_project/spatten/spatten_hardware/hardware/workloads/clean_small.csv,0,64,16
+/home/arun-venkat/summer_project/spatten/spatten_hardware/hardware/workloads/final_test.csv,0,64,16
+/home/arun-venkat/summer_project/spatten/spatten_hardware/hardware/workloads/final_test.csv,0,64,16
+/home/arun-venkat/summer_project/spatten/spatten_hardware/hardware/workloads/micro_test.csv,374,64,16
